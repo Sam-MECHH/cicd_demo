@@ -1,0 +1,48 @@
+name: Daily Product ETL to Notion
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of Jan, Apr, Jul, Oct (once per quarter)
+    - cron: "0 6 1 1,4,7,10 *"
+  workflow_dispatch:
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_URL: "https://dummyjson.com/products" # This is a public API that produces dummy products
+      PAGE_SIZE: "100"                    # dummyjson supports limit/skip pagination
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }} # That is an env variable that you will set in your repo
+      # DO NOT hardcode tokens. Put them in Secrets.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # This action clones the content of the current repo into the remote runner
+
+      - name: Setup Python
+        uses: actions/setup-python@v5 # This action installs python (version below)
+        with:
+          python-version: "3.11" 
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt # It installs all the necessary dependencies from requirements.txt
+
+      - name: Verify Notion database access
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: |
+          set -e
+          curl -sS -o /dev/null -w "%{http_code}\n" \
+            -H "Authorization: Bearer $NOTION_TOKEN" \
+            -H "Notion-Version: 2022-06-28" \
+            "https://api.notion.com/v1/databases/$NOTION_DATABASE_ID" | tee http_code.txt
+          code=$(cat http_code.txt)
+          if [ "$code" != "200" ]; then
+            echo "Database check failed with HTTP $code. Check ID and integration sharing." >&2
+            exit 1
+          fi
+
+      - name: Run ETL
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }} # That is an env variable that you will set in your repo
+        run: python etl.py
